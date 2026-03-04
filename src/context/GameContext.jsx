@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, useCallback } from 'react';
 import { scenario } from '../data/scenario';
 
 const GameContext = createContext(null);
+const STORAGE_KEY = 'dbp_game_state';
 
 const initialState = {
     currentNode: 'start',
@@ -11,7 +12,44 @@ const initialState = {
     isGameOver: false,
 };
 
+function loadSavedState() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // Kiểm tra scene có tồn tại trong scenario không
+            if (parsed.currentNode && scenario[parsed.currentNode]) {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        // Nếu lỗi parse thì bỏ qua, dùng initialState
+    }
+    return null;
+}
+
+function saveState(state) {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+        // Bỏ qua lỗi localStorage
+    }
+}
+
+export function clearSavedGame() {
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+        // Bỏ qua
+    }
+}
+
+export function hasSavedGame() {
+    return loadSavedState() !== null;
+}
+
 function gameReducer(state, action) {
+    let newState;
     switch (action.type) {
         case 'MAKE_CHOICE': {
             const { next, impact } = action.payload;
@@ -23,19 +61,21 @@ function gameReducer(state, action) {
             const targetNode = scenario[next];
 
             if (!targetNode) {
-                return {
+                newState = {
                     ...state,
                     vp: newVp,
                     lp: newLp,
                     choices: newChoices,
                 };
+                saveState(newState);
+                return newState;
             }
 
             // Kiểm tra nếu node là final_gate (có next là function)
             if (typeof targetNode.next === 'function') {
                 const stats = { vp: newVp, lp: newLp };
                 const endingKey = targetNode.next(stats);
-                return {
+                newState = {
                     ...state,
                     currentNode: endingKey,
                     vp: newVp,
@@ -43,11 +83,13 @@ function gameReducer(state, action) {
                     choices: newChoices,
                     isGameOver: true,
                 };
+                saveState(newState);
+                return newState;
             }
 
             // Kiểm tra ending (isEnd = true)
             if (targetNode.isEnd) {
-                return {
+                newState = {
                     ...state,
                     currentNode: next,
                     vp: newVp,
@@ -55,18 +97,23 @@ function gameReducer(state, action) {
                     choices: newChoices,
                     isGameOver: true,
                 };
+                saveState(newState);
+                return newState;
             }
 
-            return {
+            newState = {
                 ...state,
                 currentNode: next,
                 vp: newVp,
                 lp: newLp,
                 choices: newChoices,
             };
+            saveState(newState);
+            return newState;
         }
 
         case 'RESTART':
+            clearSavedGame();
             return { ...initialState };
 
         default:
@@ -75,7 +122,7 @@ function gameReducer(state, action) {
 }
 
 export function GameProvider({ children }) {
-    const [state, dispatch] = useReducer(gameReducer, initialState);
+    const [state, dispatch] = useReducer(gameReducer, initialState, () => loadSavedState() || initialState);
 
     const makeChoice = useCallback((next, impact) => {
         dispatch({
